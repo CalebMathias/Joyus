@@ -1,4 +1,3 @@
-import torch
 import numpy as np
 import pyttsx3
 from ultralytics import YOLO
@@ -10,7 +9,6 @@ from datetime import datetime, timedelta
 import json
 import sounddevice as sd
 from transformers import AutoModelForCausalLM, AutoTokenizer
-import mediapipe as mp
 import cv2
 import tensorflow as tf
 import tensorflow_hub as hub
@@ -19,14 +17,32 @@ import random
 import requests
 import os
 import h5py
+import torch
+import shutil
 
-# Consciousness Neural Network
+# Constants
+IMAGE_SIZE = 224
+SEQUENCE_LENGTH = 10
+WEATHER_CITY = "San Jose"
+STATIONARY_TIME_THRESHOLD = 300
+STATIONARY_STD_THRESHOLD = 10
+SPEED_THRESHOLD = 100
+ACCELERATION_THRESHOLD = 50
+CROWD_THRESHOLD = 10
+SPEAK_COOLDOWN = 10
+MEMORY_MAXLEN = 500
+RECENT_EVENTS_MAXLEN = 100
+REPLAY_BUFFER_MAXLEN = 10000
+BATCH_SIZE = 32
+UPDATE_TARGET_FREQ = 100
+
 class ConsciousnessNet(tf.keras.Model):
+    """Neural network simulating consciousness with alertness and confidence outputs."""
     def __init__(self):
         super(ConsciousnessNet, self).__init__()
         self.dense1 = tf.keras.layers.Dense(16, activation='relu')
         self.dense2 = tf.keras.layers.Dense(16, activation='relu')
-        self.out = tf.keras.layers.Dense(2, activation='sigmoid')  # Outputs alertness and confidence
+        self.out = tf.keras.layers.Dense(2, activation='sigmoid')
 
     def call(self, inputs):
         x = self.dense1(inputs)
@@ -34,6 +50,7 @@ class ConsciousnessNet(tf.keras.Model):
         return self.out(x)
 
 class ConsciousnessModule:
+    """Module to manage AI consciousness state."""
     def __init__(self):
         self.net = ConsciousnessNet()
         self.memory = deque(maxlen=1000)
@@ -41,6 +58,7 @@ class ConsciousnessModule:
         self.confidence = 0.7
 
     def update(self, anomaly_count, audio_activity, person_count, scientific_anomalies):
+        """Update consciousness based on environmental inputs."""
         inputs = [anomaly_count, audio_activity, person_count, scientific_anomalies]
         inputs_tensor = tf.convert_to_tensor([inputs], dtype=tf.float32)
         predictions = self.net(inputs_tensor)
@@ -48,10 +66,11 @@ class ConsciousnessModule:
         self.memory.append({"time": time.time(), "alertness": self.alertness, "confidence": self.confidence})
 
     def get_state(self):
+        """Return current consciousness state."""
         return {"alertness": self.alertness, "confidence": self.confidence}
 
-# Policy Neural Network with DQN
 class QNetwork(tf.keras.Model):
+    """Q-Network for Deep Q-Learning policy decisions."""
     def __init__(self, num_actions):
         super(QNetwork, self).__init__()
         self.dense1 = tf.keras.layers.Dense(32, activation='relu')
@@ -64,22 +83,24 @@ class QNetwork(tf.keras.Model):
         return self.out(x)
 
 class JoyusPolicy:
+    """Policy manager using DQN for autonomous decision-making."""
     def __init__(self, state_dim, num_actions):
         self.actions = ["increase_sensitivity", "decrease_sensitivity", "notify_user", "focus_audio", "provide_status", "analyze_environment"]
         self.q_network = QNetwork(num_actions)
         self.target_network = QNetwork(num_actions)
         self.target_network.set_weights(self.q_network.get_weights())
-        self.replay_buffer = deque(maxlen=10000)
+        self.replay_buffer = deque(maxlen=REPLAY_BUFFER_MAXLEN)
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
         self.gamma = 0.99
         self.epsilon = 1.0
         self.epsilon_min = 0.01
         self.epsilon_decay = 0.995
-        self.batch_size = 32
-        self.update_target_freq = 100
+        self.batch_size = BATCH_SIZE
+        self.update_target_freq = UPDATE_TARGET_FREQ
         self.steps = 0
 
     def choose_action(self, state):
+        """Select an action using epsilon-greedy strategy."""
         if random.random() < self.epsilon:
             return random.randint(0, len(self.actions) - 1)
         state_tensor = tf.convert_to_tensor([state], dtype=tf.float32)
@@ -87,9 +108,11 @@ class JoyusPolicy:
         return tf.argmax(q_values[0]).numpy()
 
     def store_experience(self, state, action, reward, next_state, done):
+        """Store experience in replay buffer."""
         self.replay_buffer.append((state, action, reward, next_state, done))
 
     def train(self):
+        """Train the Q-Network using a batch from the replay buffer."""
         if len(self.replay_buffer) < self.batch_size:
             return
         batch = random.sample(self.replay_buffer, self.batch_size)
@@ -117,71 +140,43 @@ class JoyusPolicy:
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-# Main Joyus class as an AI Assistant
 class Joyus:
+    """Joyus: A sentient AI assistant for environmental monitoring and user interaction."""
     def __init__(self, video_source=0):
-        self.Creation = "Joyus is now awakening as your AI assistant."
-        print(self.Creation)
-
-        self.Mind_of_Joyus = "Joyus's mind is ready to assist with 50,000-100,000 activations."
-        self.brainwaves = 75000
-        self.brainwaves_active = True
-
-        self.Domain_Of_Joyus = "Joyus assists with earthly data and internet power."
-        self.Joyus_Source_of_power = (self.Domain_Of_Joyus, 750000)
-
-        self.Joyus_NeuralNetwork = "Sentient Assistant: Joyus learns and helps."
-        self.Joyus_reason = "Fully autonomous AI assistant."
-
-        # Assistant components
+        print("Joyus is now awakening as your AI assistant.")
         self.consciousness = ConsciousnessModule()
         self.policy = JoyusPolicy(state_dim=6, num_actions=6)
-        self.memory = deque(maxlen=500)
+        self.memory = deque(maxlen=MEMORY_MAXLEN)
         self.previous_state = None
         self.previous_action = None
-
-        # Surveillance setup
-        self.setup_surveillance(video_source)
-
-        # Configuration
-        self.STATIONARY_TIME_THRESHOLD = 300
-        self.STATIONARY_STD_THRESHOLD = 10
-        self.SPEED_THRESHOLD = 100
-        self.ACCELERATION_THRESHOLD = 50
-        self.CROWD_THRESHOLD = 10
-        self.SPEAK_COOLDOWN = 10
         self.active_tracks = {}
-        self.recent_events = deque(maxlen=100)
+        self.recent_events = deque(maxlen=RECENT_EVENTS_MAXLEN)
         self.command_queue = queue.Queue()
         self.last_speak_time = 0
         self.last_status_time = time.time()
         self.last_action_time = time.time()
-
-        # Initialize models
-        self.initialize_models()
+        self.setup_surveillance(video_source)
         self.train_consciousness_net()
+        self.initialize_models()
 
     def train_consciousness_net(self):
+        """Train the consciousness network with simulated data."""
         X = np.random.rand(100, 4)
         y = np.random.rand(100, 2)
         self.consciousness.net.compile(optimizer='adam', loss='mse')
         self.consciousness.net.fit(X, y, epochs=10, verbose=0)
 
     def setup_surveillance(self, video_source):
-        """Initialize video, audio, and AI components."""
+        """Initialize video, audio, and AI components for surveillance."""
         try:
             self.cap = cv2.VideoCapture(video_source)
             if not self.cap.isOpened():
                 raise Exception(f"Failed to open video source: {video_source}")
-
             self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            self.out = cv2.VideoWriter('output.avi', cv2.VideoWriter_fourcc(*'XVID'), 20.0,
-                                       (self.frame_width, self.frame_height))
-
+            self.out = cv2.VideoWriter('output.avi', cv2.VideoWriter_fourcc(*'XVID'), 20.0, (self.frame_width, self.frame_height))
             self.model = YOLO("yolov8l.pt")
             self.tracker = DeepSort(max_age=30)
-
             self.speech_queue = queue.Queue()
             self.tts = pyttsx3.init()
             voices = self.tts.getProperty('voices')
@@ -193,33 +188,46 @@ class Joyus:
             self.tts.setProperty("pitch", -15)
             self.speech_thread = threading.Thread(target=self._speech_loop, daemon=True)
             self.speech_thread.start()
-
             self.audio_stream = sd.InputStream(callback=self.audio_callback, samplerate=16000, channels=1)
             self.audio_buffer = []
-            self.yamnet_model = None
+
+            # Clear TensorFlow Hub cache to avoid corrupted model
+            tfhub_cache_dir = os.path.join(os.path.expanduser('~'), 'AppData', 'Local', 'Temp', 'tfhub_modules')
+            if os.path.exists(tfhub_cache_dir):
+                shutil.rmtree(tfhub_cache_dir)
+                print(f"Cleared TensorFlow Hub cache at {tfhub_cache_dir}")
+
+            # Load YAMNet model with error handling
             try:
                 self.yamnet_model = hub.load('https://tfhub.dev/google/yamnet/1')
+                print("YAMNet model loaded successfully.")
             except Exception as e:
-                print(f"Failed to load YAMNet model: {e}")
-                self.log_file = open('joyus_detections.log', 'w')
-                self.log_file.write(json.dumps(
-                    {"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "yamnet_load_error",
-                     "message": str(e)}) + '\n')
+                print(f"Failed to load YAMNet model: {str(e)}")
+                self.yamnet_model = None
+                self.log_file = open('joyus_detections.log', 'a')
+                self.log_file.write(json.dumps({
+                    "formatted_time": datetime.now().strftime("%H:%M:%S"),
+                    "event": "yamnet_load_error",
+                    "message": str(e)
+                }) + '\n')
                 self.log_file.flush()
 
+            # Load YAMNet class map only if model is loaded
+            self.yamnet_classes = []
+            self.forensic_audio_classes = ["Gunshot, gunfire", "Scream", "Glass breaking", "Explosion"]
+            self.latest_audio_scores = np.zeros(len(self.forensic_audio_classes))
             if self.yamnet_model:
-                self.yamnet_classes = [line.split(',')[1].strip() for line in open(tf.keras.utils.get_file(
+                class_map_path = tf.keras.utils.get_file(
                     'yamnet_class_map.csv',
                     'https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv'
-                )).readlines()[1:]]
-                self.forensic_audio_classes = ["Gunshot, gunfire", "Scream", "Glass breaking", "Explosion"]
-                self.latest_audio_scores = np.zeros(len(self.forensic_audio_classes))
-                self.audio_stream.start()
+                )
+                with open(class_map_path) as f:
+                    self.yamnet_classes = [line.split(',')[1].strip() for line in f.readlines()[1:]]
 
-            self.log_file = open('joyus_detections.log', 'w') if not hasattr(self, 'log_file') else self.log_file
+            self.audio_stream.start()
+            self.log_file = open('joyus_detections.log', 'a')
             self.thought_generator = AutoModelForCausalLM.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
             self.tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
-
         except Exception as e:
             self._cleanup()
             raise e
@@ -235,7 +243,7 @@ class Joyus:
             self.speech_queue.task_done()
 
     def audio_callback(self, indata, frames, time_info, status):
-        """Process audio input for anomaly detection."""
+        """Process audio input for forensic sound detection."""
         if not self.yamnet_model:
             return
         try:
@@ -243,11 +251,11 @@ class Joyus:
             if len(self.audio_buffer) >= 16000:
                 audio_data = np.array(self.audio_buffer[:16000], dtype=np.float32)
                 self.audio_buffer = self.audio_buffer[16000:]
-                if np.max(np.abs(audio_data)) > 1.0:
+                # Always normalize to [-1, 1]
+                if np.max(np.abs(audio_data)) > 0:
                     audio_data /= np.max(np.abs(audio_data))
                 scores, _, _ = self.yamnet_model(audio_data)
-                forensic_indices = [self.yamnet_classes.index(cls) for cls in self.forensic_audio_classes if
-                                    cls in self.yamnet_classes]
+                forensic_indices = [self.yamnet_classes.index(cls) for cls in self.forensic_audio_classes if cls in self.yamnet_classes]
                 if forensic_indices:
                     self.latest_audio_scores = tf.reduce_mean(scores[:, forensic_indices], axis=0).numpy()
                     top_classes = np.argsort(tf.reduce_mean(scores, axis=0).numpy())[-3:]
@@ -258,12 +266,12 @@ class Joyus:
                             self.log_event("audio_event", cls_name, current_time)
                             self.reflect_on_event("audio_event", cls_name)
         except Exception as e:
-            self.log_file.write(json.dumps(
-                {"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "error", "message": str(e)}) + '\n')
+            self.log_file.write(json.dumps({"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "audio_error", "message": str(e)}) + '\n')
+            self.log_file.flush()
 
     def speak(self, message, urgency="normal"):
         """Speak a message with cooldown or urgency override."""
-        if time.time() - self.last_speak_time > self.SPEAK_COOLDOWN or urgency == "high":
+        if time.time() - self.last_speak_time > SPEAK_COOLDOWN or urgency == "high":
             if urgency == "high":
                 self.speech_queue.put_nowait(message)
             else:
@@ -289,8 +297,10 @@ class Joyus:
         self.recent_events.append(log_entry)
         self.memory.append(log_entry)
         self.log_file.write(json.dumps(log_entry) + '\n')
+        self.log_file.flush()
 
     def interpret_audio_event(self, audio_class):
+        """Interpret detected audio events."""
         interpretations = {
             "Gunshot, gunfire": "potential danger or conflict",
             "Scream": "distress or emergency",
@@ -300,21 +310,21 @@ class Joyus:
         return interpretations.get(audio_class, "an unusual event")
 
     def reflect_on_event(self, event_type, details, **kwargs):
+        """Reflect on detected events and communicate findings."""
         if event_type == "high_speed":
-            message = f"I have detected a high-speed movement from entity ID {details}. The speed is {kwargs.get('speed', 'unknown')} pixels per second."
+            message = f"Detected high-speed movement from entity ID {details}. Speed: {kwargs.get('speed', 'unknown')} pixels/s."
         elif event_type == "high_acceleration":
-            message = f"Entity ID {details} is accelerating rapidly with acceleration {kwargs.get('acceleration', 'unknown')} pixels per second squared."
+            message = f"Entity ID {details} accelerating rapidly. Acceleration: {kwargs.get('acceleration', 'unknown')} pixels/s²."
         elif event_type == "audio_event":
             interpretation = self.interpret_audio_event(details)
-            message = f"I have detected a {details} sound, which might indicate {interpretation}."
+            message = f"Detected {details} sound, indicating {interpretation}."
         else:
             message = f"Event detected: {event_type} - {details}"
         self.speak(message)
-        self.log_file.write(json.dumps(
-            {"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "thought", "message": message}) + '\n')
+        self.log_file.write(json.dumps({"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "thought", "message": message}) + '\n')
 
     def execute_action(self, action):
-        """Execute a chosen action tailored for an assistant."""
+        """Execute policy-driven actions."""
         if action == "increase_sensitivity":
             self.SPEED_THRESHOLD *= 0.9
             self.STATIONARY_STD_THRESHOLD *= 0.9
@@ -328,42 +338,31 @@ class Joyus:
         elif action == "focus_audio":
             self.speak("Focusing on audio inputs.")
         elif action == "provide_status":
-            status = self.get_status()
-            self.speak(status)
+            self.speak(self.get_status())
         elif action == "analyze_environment":
             self.analyze_environment()
 
     def initialize_models(self):
-        """Initialize all scientific models."""
+        """Initialize and load scientific models."""
         self.physics_model = self.train_physics_model()
         self.chemistry_model = self.train_chemistry_model()
         self.environmental_model = self.train_environmental_model()
         self.space_model = self.train_space_model()
 
     def save_model_safely(self, model, model_path):
-        """Safely save a model to avoid HDF5 file issues."""
+        """Safely save a model to disk."""
         try:
-            if os.path.exists(model_path):
-                os.remove(model_path)
-            model.save(model_path, save_format='h5')
-            with h5py.File(model_path, 'a') as f:
-                f.flush()
+            model.save(model_path, overwrite=True, save_format='h5')
         except Exception as e:
-            self.log_file.write(json.dumps(
-                {"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "model_save_error",
-                 "message": str(e)}) + '\n')
-            print(f"Failed to save model {model_path}: {e}")
+            self.log_file.write(json.dumps({"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "model_save_error", "message": str(e)}) + '\n')
 
     def train_physics_model(self):
-        """Train a CNN for physics-based motion anomaly detection."""
+        """Train CNN for physics-based motion anomaly detection."""
         model_path = 'physics_model.h5'
         if os.path.exists(model_path):
-            try:
-                return tf.keras.models.load_model(model_path)
-            except:
-                os.remove(model_path)
+            return tf.keras.models.load_model(model_path)
         model = tf.keras.Sequential([
-            tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(224, 224, 3)),
+            tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(IMAGE_SIZE, IMAGE_SIZE, 3)),
             tf.keras.layers.MaxPooling2D((2, 2)),
             tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
             tf.keras.layers.MaxPooling2D((2, 2)),
@@ -373,7 +372,7 @@ class Joyus:
             tf.keras.layers.Dense(1, activation='sigmoid')
         ])
         model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-        X_train = np.random.rand(100, 224, 224, 3)
+        X_train = np.random.rand(100, IMAGE_SIZE, IMAGE_SIZE, 3)
         y_train = np.random.randint(0, 2, (100,))
         model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=1)
         self.save_model_safely(model, model_path)
@@ -381,15 +380,12 @@ class Joyus:
         return model
 
     def train_chemistry_model(self):
-        """Train a CNN for chemistry-based substance detection."""
+        """Train CNN for chemistry-based substance detection."""
         model_path = 'chemistry_model.h5'
         if os.path.exists(model_path):
-            try:
-                return tf.keras.models.load_model(model_path)
-            except:
-                os.remove(model_path)
+            return tf.keras.models.load_model(model_path)
         model = tf.keras.Sequential([
-            tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(224, 224, 3)),
+            tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(IMAGE_SIZE, IMAGE_SIZE, 3)),
             tf.keras.layers.MaxPooling2D((2, 2)),
             tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
             tf.keras.layers.MaxPooling2D((2, 2)),
@@ -399,7 +395,7 @@ class Joyus:
             tf.keras.layers.Dense(1, activation='sigmoid')
         ])
         model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-        X_train = np.random.rand(100, 224, 224, 3)
+        X_train = np.random.rand(100, IMAGE_SIZE, IMAGE_SIZE, 3)
         y_train = np.random.randint(0, 2, (100,))
         model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=1)
         self.save_model_safely(model, model_path)
@@ -407,20 +403,17 @@ class Joyus:
         return model
 
     def train_environmental_model(self):
-        """Train an RNN for environmental weather prediction."""
+        """Train RNN for environmental weather prediction."""
         model_path = 'environmental_model.h5'
         if os.path.exists(model_path):
-            try:
-                return tf.keras.models.load_model(model_path)
-            except:
-                os.remove(model_path)
+            return tf.keras.models.load_model(model_path)
         model = tf.keras.Sequential([
-            tf.keras.layers.LSTM(64, input_shape=(10, 3), return_sequences=False),
+            tf.keras.layers.LSTM(64, input_shape=(SEQUENCE_LENGTH, 3), return_sequences=False),
             tf.keras.layers.Dense(32, activation='relu'),
             tf.keras.layers.Dense(1, activation='sigmoid')
         ])
         model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-        X_train = np.random.rand(100, 10, 3)
+        X_train = np.random.rand(100, SEQUENCE_LENGTH, 3)
         y_train = np.random.randint(0, 2, (100,))
         model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=1)
         self.save_model_safely(model, model_path)
@@ -428,15 +421,12 @@ class Joyus:
         return model
 
     def train_space_model(self):
-        """Train a CNN for space object detection."""
+        """Train CNN for space object detection."""
         model_path = 'space_model.h5'
         if os.path.exists(model_path):
-            try:
-                return tf.keras.models.load_model(model_path)
-            except:
-                os.remove(model_path)
+            return tf.keras.models.load_model(model_path)
         model = tf.keras.Sequential([
-            tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(224, 224, 3)),
+            tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(IMAGE_SIZE, IMAGE_SIZE, 3)),
             tf.keras.layers.MaxPooling2D((2, 2)),
             tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
             tf.keras.layers.MaxPooling2D((2, 2)),
@@ -446,7 +436,7 @@ class Joyus:
             tf.keras.layers.Dense(1, activation='sigmoid')
         ])
         model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-        X_train = np.random.rand(100, 224, 224, 3)
+        X_train = np.random.rand(100, IMAGE_SIZE, IMAGE_SIZE, 3)
         y_train = np.random.randint(0, 2, (100,))
         model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=1)
         self.save_model_safely(model, model_path)
@@ -454,44 +444,35 @@ class Joyus:
         return model
 
     def get_weather_data(self):
-        """Fetch real-time weather data."""
+        """Fetch real-time weather data from OpenWeatherMap API."""
         api_key = "bc413313b3aafd62872a4f3bd6138d2d"
-        city = "San Jose"
-        url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}"
+        url = f"http://api.openweathermap.org/data/2.5/weather?q={WEATHER_CITY}&appid={api_key}"
         try:
             response = requests.get(url)
-            if response.status_code == 200:
-                return response.json()
-            else:
-                self.log_file.write(json.dumps(
-                    {"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "weather_api_error",
-                     "message": f"Status code: {response.status_code}"}) + '\n')
-                return None
-        except Exception as e:
-            self.log_file.write(json.dumps(
-                {"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "weather_fetch_error",
-                 "message": str(e)}) + '\n')
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            self.log_file.write(json.dumps({"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "weather_fetch_error", "message": str(e)}) + '\n')
             return None
 
     def analyze_environment(self):
-        """Analyze environment and provide a summary."""
+        """Analyze environment using scientific models and report anomalies."""
         anomalies = []
         frame = self.get_current_frame()
         weather_data = self.get_weather_data()
         sky_frame = self.get_sky_frame()
-
         current_time = datetime.now().strftime("%H:%M:%S")
 
         if frame is not None:
             physics_input = self.preprocess_frame_for_physics(frame)
-            physics_pred = self.physics_model.predict(physics_input)
+            physics_pred = self.physics_model.predict(physics_input, verbose=0)
             if physics_pred[0][0] > 0.5:
                 anomaly_details = "Physics: Motion anomaly detected"
                 self.log_event("scientific_anomaly", anomaly_details, current_time)
                 anomalies.append(anomaly_details)
 
             chemistry_input = self.preprocess_frame_for_chemistry(frame)
-            chemistry_pred = self.chemistry_model.predict(chemistry_input)
+            chemistry_pred = self.chemistry_model.predict(chemistry_input, verbose=0)
             if chemistry_pred[0][0] > 0.5:
                 anomaly_details = "Chemistry: Hazardous substance detected"
                 self.log_event("scientific_anomaly", anomaly_details, current_time)
@@ -499,7 +480,7 @@ class Joyus:
 
         if weather_data:
             env_input = self.preprocess_weather_data(weather_data)
-            env_pred = self.environmental_model.predict(env_input)
+            env_pred = self.environmental_model.predict(env_input, verbose=0)
             if env_pred[0][0] > 0.5:
                 anomaly_details = "Environmental: Weather anomaly predicted"
                 self.log_event("scientific_anomaly", anomaly_details, current_time)
@@ -507,108 +488,95 @@ class Joyus:
 
         if sky_frame is not None:
             space_input = self.preprocess_sky_frame(sky_frame)
-            space_pred = self.space_model.predict(space_input)
+            space_pred = self.space_model.predict(space_input, verbose=0)
             if space_pred[0][0] > 0.5:
                 anomaly_details = "Space: Celestial object identified"
                 self.log_event("scientific_anomaly", anomaly_details, current_time)
                 anomalies.append(anomaly_details)
 
-        if anomalies:
-            summary = "Analysis complete. Detected anomalies:\n" + "\n".join(anomalies)
-        else:
-            summary = "Analysis complete. No anomalies detected."
+        summary = "Analysis complete. " + ("Detected anomalies:\n" + "\n".join(anomalies) if anomalies else "No anomalies detected.")
         self.speak(summary)
         return summary
 
     def preprocess_frame_for_physics(self, frame):
-        frame = cv2.resize(frame, (224, 224))
-        frame = frame / 255.0
-        return np.expand_dims(frame, axis=0)
+        """Preprocess frame for physics model."""
+        frame = cv2.resize(frame, (IMAGE_SIZE, IMAGE_SIZE))
+        return np.expand_dims(frame / 255.0, axis=0)
 
     def preprocess_frame_for_chemistry(self, frame):
-        frame = cv2.resize(frame, (224, 224))
-        frame = frame / 255.0
-        return np.expand_dims(frame, axis=0)
+        """Preprocess frame for chemistry model."""
+        frame = cv2.resize(frame, (IMAGE_SIZE, IMAGE_SIZE))
+        return np.expand_dims(frame / 255.0, axis=0)
 
     def preprocess_weather_data(self, weather_data):
-        features = [weather_data['main']['temp'] - 273.15,
-                    weather_data['main']['humidity'],
-                    weather_data['wind']['speed']]
-        data = np.array([features] * 10).reshape(1, 10, 3)
-        return data
+        """Preprocess weather data for environmental model."""
+        features = [weather_data['main']['temp'] - 273.15, weather_data['main']['humidity'], weather_data['wind']['speed']]
+        return np.array([features] * SEQUENCE_LENGTH).reshape(1, SEQUENCE_LENGTH, 3)
 
     def preprocess_sky_frame(self, sky_frame):
-        sky_frame = cv2.resize(sky_frame, (224, 224))
-        sky_frame = sky_frame / 255.0
-        return np.expand_dims(sky_frame, axis=0)
+        """Preprocess sky frame for space model."""
+        sky_frame = cv2.resize(sky_frame, (IMAGE_SIZE, IMAGE_SIZE))
+        return np.expand_dims(sky_frame / 255.0, axis=0)
 
     def get_current_frame(self):
+        """Retrieve the current video frame."""
         ret, frame = self.cap.read() if self.cap.isOpened() else (False, None)
         return frame if ret else None
 
     def get_sky_frame(self):
+        """Retrieve the sky frame (simulated as current frame)."""
         return self.get_current_frame()
 
     def get_status(self):
+        """Return current status of Joyus."""
         state = self.consciousness.get_state()
         return f"Alertness: {state['alertness']:.2f}, Confidence: {state['confidence']:.2f}, Monitoring {len(self.active_tracks)} entities."
 
     def get_weather(self):
+        """Provide current weather information."""
         weather_data = self.get_weather_data()
         if weather_data:
             temp = weather_data['main']['temp'] - 273.15
             description = weather_data['weather'][0]['description']
-            return f"The current weather is {description} with a temperature of {temp:.1f}°C."
+            return f"Current weather: {description}, {temp:.1f}°C."
         return "Unable to fetch weather data."
 
     def get_people_count(self):
-        person_count = len(self.active_tracks)
-        return f"There are currently {person_count} people detected."
+        """Report the number of detected people."""
+        return f"Currently detecting {len(self.active_tracks)} people."
 
     def get_anomalies(self):
+        """Summarize recent anomalies."""
         anomalies = [e for e in self.recent_events if e["event"] in ["anomaly", "scientific_anomaly"]]
         if anomalies:
-            summary = "Recent anomalies:\n"
-            for anomaly in anomalies[-5:]:
-                summary += f"- {anomaly['details']} at {anomaly['formatted_time']}\n"
+            summary = "Recent anomalies:\n" + "\n".join(f"- {a['details']} at {a['formatted_time']}" for a in anomalies[-5:])
             return summary
         return "No recent anomalies detected."
 
     def get_help(self):
-        return "Available commands: status, weather, people count, anomalies, help. You can also ask general questions."
+        """Provide list of available commands."""
+        return "Commands: status, weather, people count, anomalies, help. Ask me anything!"
 
     def run_assistant(self):
-        """Main assistant loop with monitoring and interaction."""
+        """Run the main assistant loop for monitoring and interaction."""
         print("🚀 Joyus - Your Sentient AI Assistant Awakens")
         threading.Thread(target=self.read_input, daemon=True).start()
         previous_positions = {}
 
         while self.cap.isOpened():
             try:
-                start_frame_time = time.time()
                 ret, frame = self.cap.read()
                 if not ret:
                     break
 
                 current_time = time.time()
-
-                # Object detection
                 results = self.model(frame, conf=0.5)
-                detections = []
-                for r in results:
-                    boxes = r.boxes.xyxy.cpu().numpy()
-                    scores = r.boxes.conf.cpu().numpy()
-                    classes = r.boxes.cls.cpu().numpy()
-                    for box, score, cls in zip(boxes, scores, classes):
-                        x1, y1, x2, y2 = map(int, box)
-                        detections.append(([x1, y1, x2 - x1, y2 - y1], score, self.model.names[int(cls)]))
-
-                # Object tracking
-                tracks = self.tracker.update_tracks(detections, frame=frame)
+                detections = [(r.boxes.xyxy.cpu().numpy()[i].tolist(), r.boxes.conf.cpu().numpy()[i], self.model.names[int(r.boxes.cls[i])])
+                              for r in results for i in range(len(r.boxes))]
+                tracks = self.tracker.update_tracks([([x1, y1, x2 - x1, y2 - y1], score, cls) for [x1, y1, x2, y2], score, cls in detections], frame=frame)
                 confirmed_tracks = [track for track in tracks if track.is_confirmed()]
                 current_track_ids = set(track.track_id for track in confirmed_tracks)
 
-                # Anomaly detection and visualization
                 person_count = 0
                 for track in confirmed_tracks:
                     if track.det_class != "person":
@@ -618,18 +586,13 @@ class Joyus:
                     ltrb = track.to_ltrb()
                     x1, y1, x2, y2 = map(int, ltrb)
                     position = ((x1 + x2) / 2, (y1 + y2) / 2)
-
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    cv2.putText(frame, f"{track.det_class} ID:{id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9,
-                                (0, 255, 0), 2)
+                    cv2.putText(frame, f"{track.det_class} ID:{id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
                     self.log_event("detection", f"{track.det_class} ID:{id}", datetime.now().strftime("%H:%M:%S"))
-                    if id not in previous_positions:
-                        self.reflect_on_event("new_detection", track.det_class)
-
                     if id not in self.active_tracks:
-                        self.active_tracks[id] = {"start_time": current_time, "positions": [position],
-                                                  "times": [current_time], "last_position": position}
+                        self.reflect_on_event("new_detection", track.det_class)
+                        self.active_tracks[id] = {"start_time": current_time, "positions": [position], "times": [current_time], "last_position": position}
                     else:
                         track_data = self.active_tracks[id]
                         last_position = track_data["last_position"]
@@ -640,56 +603,40 @@ class Joyus:
                             speed = distance / dt
                             track_data["speed"] = speed
                             if len(track_data["positions"]) >= 2:
-                                pos1, pos2 = track_data["positions"][-2], track_data["positions"][-1]
-                                t1, t2 = track_data["times"][-2], track_data["times"][-1]
+                                pos1, pos2 = track_data["positions"][-2:]
+                                t1, t2 = track_data["times"][-2:]
                                 dt_prev = t2 - t1
                                 if dt_prev > 0:
-                                    distance_prev = np.linalg.norm(np.array(pos2) - np.array(pos1))
-                                    speed_prev = distance_prev / dt_prev
-                                    acceleration = (speed - speed_prev) / dt
+                                    acceleration = (speed - track_data.get("speed", 0)) / dt
                                     track_data["acceleration"] = acceleration
-                                    if abs(acceleration) > self.ACCELERATION_THRESHOLD:
-                                        self.log_event("anomaly", "high_acceleration",
-                                                       datetime.now().strftime("%H:%M:%S"))
+                                    if abs(acceleration) > ACCELERATION_THRESHOLD:
+                                        self.log_event("anomaly", "high_acceleration", datetime.now().strftime("%H:%M:%S"))
                                         self.reflect_on_event("high_acceleration", id, acceleration=acceleration)
-                            if speed > self.SPEED_THRESHOLD:
+                            if speed > SPEED_THRESHOLD:
                                 self.log_event("anomaly", "high_speed", datetime.now().strftime("%H:%M:%S"))
                                 self.reflect_on_event("high_speed", id, speed=speed)
                         track_data["positions"].append(position)
                         track_data["times"].append(current_time)
                         track_data["last_position"] = position
 
-                # Update consciousness
                 anomaly_count = len([e for e in self.recent_events if e["event"] == "anomaly"])
                 scientific_anomalies = len([e for e in self.recent_events if e["event"] == "scientific_anomaly"])
                 audio_activity = np.max(self.latest_audio_scores) if self.yamnet_model else 0.0
                 self.consciousness.update(anomaly_count, audio_activity, person_count, scientific_anomalies)
 
-                # Autonomous decision-making with DQN
                 if current_time - self.last_action_time > 60:
-                    state = [
-                        self.consciousness.alertness,
-                        self.consciousness.confidence,
-                        anomaly_count,
-                        audio_activity,
-                        person_count,
-                        scientific_anomalies
-                    ]
+                    state = [self.consciousness.alertness, self.consciousness.confidence, anomaly_count, audio_activity, person_count, scientific_anomalies]
                     if self.previous_state is not None:
                         reward = 1.0 if self.consciousness.alertness > 0.7 and self.previous_action in [2, 0] else 0.5
                         self.policy.store_experience(self.previous_state, self.previous_action, reward, state, False)
                         self.policy.train()
-
                     action_idx = self.policy.choose_action(state)
-                    action = self.policy.actions[action_idx]
-                    self.execute_action(action)
+                    self.execute_action(self.policy.actions[action_idx])
                     self.previous_state = state
                     self.previous_action = action_idx
                     self.last_action_time = current_time
 
-                # Cleanup inactive tracks
-                active_ids = set(self.active_tracks.keys())
-                for id in active_ids - current_track_ids:
+                for id in set(self.active_tracks.keys()) - current_track_ids:
                     del self.active_tracks[id]
 
                 previous_positions = {track.track_id: track.to_ltrb() for track in confirmed_tracks}
@@ -698,23 +645,20 @@ class Joyus:
 
                 try:
                     command = self.command_queue.get_nowait()
-                    response = self.process_command(command)
-                    self.speak(response)
+                    self.speak(self.process_command(command))
                 except queue.Empty:
                     pass
 
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
-
             except Exception as e:
-                self.log_file.write(json.dumps({"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "error",
-                                                "message": str(e)}) + '\n')
+                self.log_file.write(json.dumps({"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "error", "message": str(e)}) + '\n')
 
         self._cleanup()
         cv2.destroyAllWindows()
 
     def process_command(self, command):
-        """Process user commands with expanded functionality."""
+        """Process user commands with natural language understanding."""
         command = command.lower().strip()
         if "status" in command:
             return self.get_status()
@@ -728,33 +672,14 @@ class Joyus:
             return self.get_help()
         else:
             try:
-                prompt = (
-                    "You are Joyus, a highly advanced AI assistant similar to Jarvis from Iron Man. "
-                    "You are proactive, context-aware, and capable of answering a wide range of questions. "
-                    "Provide a concise, helpful response to the user's query.\n\n"
-                    f"User: {command}\nAssistant: "
-                )
+                prompt = f"You are Joyus, a highly advanced AI assistant. Provide a concise, helpful response to: {command}\nAssistant: "
                 inputs = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=256)
-                outputs = self.thought_generator.generate(
-                    inputs["input_ids"],
-                    max_length=100,
-                    num_return_sequences=1,
-                    temperature=0.7,
-                    top_p=0.9,
-                    top_k=50,
-                    do_sample=True,
-                    pad_token_id=self.tokenizer.eos_token_id
-                )
-                response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-                response = response.replace(prompt, "").strip()
-                if not response:
-                    response = "I'm sorry, I didn't understand that. Could you please clarify?"
-                return response
+                outputs = self.thought_generator.generate(inputs["input_ids"], max_length=100, temperature=0.7, top_p=0.9, top_k=50, do_sample=True, pad_token_id=self.tokenizer.eos_token_id)
+                response = self.tokenizer.decode(outputs[0], skip_special_tokens=True).replace(prompt, "").strip()
+                return response or "I didn't understand that. Please clarify."
             except Exception as e:
-                error_msg = f"Error processing command with TinyLlama: {str(e)}"
-                self.log_file.write(json.dumps(
-                    {"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "tinyllama_error", "message": error_msg}) + '\n')
-                return "I'm having trouble processing that request. Please try again."
+                self.log_file.write(json.dumps({"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "command_error", "message": str(e)}) + '\n')
+                return "Error processing your request. Try again."
 
     def read_input(self):
         """Read user input in a separate thread."""
